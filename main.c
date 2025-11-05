@@ -14,7 +14,8 @@ DWORD ThreadID1;
 
 int  
     pontos = 0,
-    pontosTotais = 244;
+    pontosTotais = 244,
+    direcaoFantasma = 0;
 
 int pacman[2] = {24, 15};
 
@@ -280,124 +281,163 @@ DWORD WINAPI moverPacman(LPVOID lpParam) {
 }
 
 // Verifica se a posição (x, y) está livre para o fantasma 'index'
-int verificarPosicaoFantasmaPerserguidor(int x, int y, int i){
-    if (x < 0 || x >= MAXLIN || y < 0 || y >= MAXCOL) return 0;
+int podeMoverFantasma(int x, int y, int fantasma_index){
+    // 1. Verifica limites do mapa (O BUG PRINCIPAL)
+    if (x < 0 || x >= MAXLIN || y < 0 || y >= MAXCOL) 
+        return 0;
 
     WaitForSingleObject(mutex, INFINITE);
 
-    int verify = 0;
-
+    // 2. Verifica se o destino é um caminho válido (0=ponto, 9=vazio)
     switch (mapa[x][y]) {
-        case 0: case 9:
-            verify = 1;
+        case 0:
+        case 9:
+            // É um caminho válido, continua a verificação
             break;
         default:
-            verify = 0;
-            break;
+            // É uma parede (1, 2, 3, 4, 8, etc)
+            ReleaseMutex(mutex);
+            return 0; 
     }
 
+    // 3. Verifica colisão com Pac-Man
     if (x == pacman[0] && y == pacman[1]) {
-        gameover = 1; 
-        verify = 1; 
+        gameover = 1;
+        ReleaseMutex(mutex);
+        return 1; // É válido (e fatal)
     }
 
-    for (int j = 0; j < 2; j++) {
-        if (j != i && x == fantasma[j][0] && y == fantasma[j][1]) {
-            verify = 0;
-            break;
-        }
+    // 4. Verifica colisão com o OUTRO fantasma
+    int outro_fantasma = (fantasma_index == 0) ? 1 : 0;
+    if (x == fantasma[outro_fantasma][0] && y == fantasma[outro_fantasma][1]) {
+        ReleaseMutex(mutex);
+        return 0; // Bloqueado pelo outro fantasma
     }
 
+    // Se passou por tudo, o movimento é válido
     ReleaseMutex(mutex);
-    
-    return verify;
-}
-
-
-int verificarPosicaoFantasma(int x, int y, int i){
-    WaitForSingleObject(mutex,INFINITE);
-
-    int verify = 0;
-
-    switch (mapa[x][y]) {
-        case 0: verify = 1; break;
-        case 9: verify = 1; break;
-        default: verify = 0; break;
-    }
-
-    if(x == pacman[0] && y == pacman[1])
-        { gameover = 1; verify = 1; }
-    
-    if (i == 0){
-        if(x == fantasma[1][0] && y == fantasma[1][1]){
-            verify = 0;
-        }
-    } else {
-        if(x == fantasma[0][0] && y == fantasma[0][1]){
-            verify = 0;
-        }
-    }
-
-    ReleaseMutex(mutex);
-    
-    return verify;
+    return 1;
 }
 
 DWORD WINAPI cacarPacman(LPVOID lpParam) {
-    srand(time(NULL));
-    int i = (int)lpParam;  // Identify which ghost is being moved
-    int direction = -1;  // Current direction of the ghost
+    int i = (int)lpParam; // i == 0 (fantasma inteligente)
+    int direcaoAtual = 3; // 0=Cima, 1=Baixo, 2=Esquerda, 3=Direita
+
+    // Pequeno delay inicial para dessincronizar os fantasmas
+    Sleep(100); 
 
     while (gameover == 0 && gameWin == 0) {
-        WaitForSingleObject(mutex, INFINITE);
-        int distanciaX = pacman[1] - fantasma[i][1];
-        int distanciaY = pacman[0] - fantasma[i][0];
-        ReleaseMutex(mutex);
+        
+        // Pega a posição ATUAL antes de qualquer cálculo
+        int xAtual = fantasma[i][0];
+        int yAtual = fantasma[i][1];
 
-        // Determine the new direction if not moving or hit a wall
-        if (direction == -1 || 
-            !verificarPosicaoFantasma(fantasma[i][0], fantasma[i][1] + ((direction == 3) - (direction == 2)), i) && 
-            !verificarPosicaoFantasma(fantasma[i][0] + ((direction == 1) - (direction == 0)), fantasma[i][1], i)) {
+        // --- 1. Verificar quais movimentos são possíveis ---
+        int podeCima = podeMoverFantasma(xAtual - 1, yAtual, i);
+        int podeBaixo = podeMoverFantasma(xAtual + 1, yAtual, i);
+        int podeEsq = podeMoverFantasma(xAtual, yAtual - 1, i);
+        int podeDir = podeMoverFantasma(xAtual, yAtual + 1, i);
 
-            if (abs(distanciaX) > abs(distanciaY)) {
-                direction = (distanciaX > 0) ? 3 : 2; // 3: Right, 2: Left
-            } else {
-                direction = (distanciaY > 0) ? 1 : 0; // 1: Down, 0: Up
+        int numMovesValidos = podeCima + podeBaixo + podeEsq + podeDir;
+
+        // --- 2. Decidir se precisa de uma nova direção ---
+        bool precisaDecidir = false;
+
+        // Se a direção atual é inválida (bateu na parede)
+        if (direcaoAtual == 0 && !podeCima) precisaDecidir = true;
+        else if (direcaoAtual == 1 && !podeBaixo) precisaDecidir = true;
+        else if (direcaoAtual == 2 && !podeEsq) precisaDecidir = true;
+        else if (direcaoAtual == 3 && !podeDir) precisaDecidir = true;
+
+        // Calcula a direção reversa (de onde viemos)
+        int dirReversa = -1;
+        if (direcaoAtual == 0) dirReversa = 1; // Veio de Baixo
+        if (direcaoAtual == 1) dirReversa = 0; // Veio de Cima
+        if (direcaoAtual == 2) dirReversa = 3; // Veio da Direita
+        if (direcaoAtual == 3) dirReversa = 2; // Veio da Esquerda
+
+        // É uma junção? (ignora o caminho de onde viemos)
+        int numOpcoes = 0;
+        if (podeCima && 0 != dirReversa) numOpcoes++;
+        if (podeBaixo && 1 != dirReversa) numOpcoes++;
+        if (podeEsq && 2 != dirReversa) numOpcoes++;
+        if (podeDir && 3 != dirReversa) numOpcoes++;
+
+        if (numOpcoes > 1) {
+             precisaDecidir = true; // Chegou numa junção com >1 escolha
+        }
+        
+        // --- 3. Lógica de Decisão (A parte "Inteligente") ---
+        if (precisaDecidir) {
+            int melhorDir = -1;
+            int menorDist = 99999;
+            
+            WaitForSingleObject(mutex, INFINITE); 
+            int pacmanX = pacman[0];
+            int pacmanY = pacman[1];
+            ReleaseMutex(mutex);
+
+            // Testar Cima (0)
+            if (podeCima && 0 != dirReversa) {
+                int dist = abs((xAtual - 1) - pacmanX) + abs(yAtual - pacmanY); 
+                if (dist < menorDist) {
+                    menorDist = dist;
+                    melhorDir = 0;
+                }
+            }
+            // Testar Baixo (1)
+            if (podeBaixo && 1 != dirReversa) {
+                int dist = abs((xAtual + 1) - pacmanX) + abs(yAtual - pacmanY);
+                if (dist < menorDist) {
+                    menorDist = dist;
+                    melhorDir = 1;
+                }
+            }
+            // Testar Esquerda (2)
+            if (podeEsq && 2 != dirReversa) {
+                int dist = abs(xAtual - pacmanX) + abs((yAtual - 1) - pacmanY);
+                if (dist < menorDist) {
+                    menorDist = dist;
+                    melhorDir = 2;
+                }
+            }
+            // Testar Direita (3)
+            if (podeDir && 3 != dirReversa) {
+                int dist = abs(xAtual - pacmanX) + abs((yAtual + 1) - pacmanY);
+                if (dist < menorDist) {
+                    menorDist = dist;
+                    melhorDir = 3;
+                }
             }
 
-            // Ensure the chosen direction is valid
-            if ((direction == 2 || direction == 3) && !verificarPosicaoFantasma(fantasma[i][0], fantasma[i][1] + ((direction == 3) - (direction == 2)), i)) {
-                direction = (distanciaY > 0) ? 1 : 0; // Fall back to vertical direction if horizontal is blocked
-            } else if ((direction == 0 || direction == 1) && !verificarPosicaoFantasma(fantasma[i][0] + ((direction == 1) - (direction == 0)), fantasma[i][1], i)) {
-                direction = (distanciaX > 0) ? 3 : 2; // Fall back to horizontal direction if vertical is blocked
+            // Se não achou melhor direção (beco sem saída), a única opção é voltar
+            if (melhorDir == -1) {
+                // Só pode voltar se a direção reversa for válida
+                if (dirReversa == 0 && podeCima) melhorDir = 0;
+                else if (dirReversa == 1 && podeBaixo) melhorDir = 1;
+                else if (dirReversa == 2 && podeEsq) melhorDir = 2;
+                else if (dirReversa == 3 && podeDir) melhorDir = 3;
+                else {
+                    // Preso! (Não deve acontecer, mas por segurança)
+                    // Fica parado ou escolhe a primeira opção válida
+                    if(podeCima) melhorDir = 0;
+                    else if(podeBaixo) melhorDir = 1;
+                    else if(podeEsq) melhorDir = 2;
+                    else if(podeDir) melhorDir = 3;
+                }
             }
+            
+            direcaoAtual = melhorDir;
         }
 
-        // Move the ghost in the chosen direction
-        bool moved = false;
-        switch (direction) {
-            case 0: if (verificarPosicaoFantasma(fantasma[i][0] - 1, fantasma[i][1], i)) { andarFantasma(0, i); moved = true; } break; // Up
-            case 1: if (verificarPosicaoFantasma(fantasma[i][0] + 1, fantasma[i][1], i)) { andarFantasma(1, i); moved = true; } break; // Down
-            case 2: if (verificarPosicaoFantasma(fantasma[i][0], fantasma[i][1] - 1, i)) { andarFantasma(2, i); moved = true; } break; // Left
-            case 3: if (verificarPosicaoFantasma(fantasma[i][0], fantasma[i][1] + 1, i)) { andarFantasma(3, i); moved = true; } break; // Right
-        }
-
-        // If no move was possible, choose a new direction
-        if (!moved) {
-            direction = -1;  // Reset direction to force re-evaluation
-        }
-
-        Sleep(25);
-
-        // Check for alternative routes
-        if (direction == 0 || direction == 1) {  // Moving vertically
-            if (verificarPosicaoFantasma(fantasma[i][0], fantasma[i][1] + 1, i) || verificarPosicaoFantasma(fantasma[i][0], fantasma[i][1] - 1, i)) {
-                direction = -1;  // Re-evaluate direction if there's a horizontal path
-            }
-        } else if (direction == 2 || direction == 3) {  // Moving horizontally
-            if (verificarPosicaoFantasma(fantasma[i][0] + 1, fantasma[i][1], i) || verificarPosicaoFantasma(fantasma[i][0] - 1, fantasma[i][1], i)) {
-                direction = -1;  // Re-evaluate direction if there's a vertical path
-            }
+        // --- 4. Mover o fantasma ---
+        // A função andarFantasma já tem o Sleep(veloFant)
+        // A 'direcaoAtual' agora é garantida como válida (ou o fantasma está preso)
+        if(direcaoAtual != -1) {
+             andarFantasma(direcaoAtual, i);
+        } else {
+             // Está preso e não pode nem voltar. Apenas dorme.
+             Sleep(veloFant);
         }
     }
 
@@ -414,28 +454,28 @@ DWORD WINAPI moverFantasma(LPVOID lpParam) {
     while(gameover == 0 && gameWin == 0){
         switch (numero) {
             case 0: // pra cima
-                if(verificarPosicaoFantasma(fantasma[i][0] - 1, fantasma[i][1], i))
+                if(podeMoverFantasma(fantasma[i][0] - 1, fantasma[i][1], i))
                     andarFantasma(0, i);
                 else
                     while (numero == 1 || numero == 0)
                         numero = rand() % 4;
                 break;
             case 1: // pra baixo
-                if(verificarPosicaoFantasma(fantasma[i][0] + 1, fantasma[i][1], i))
+                if(podeMoverFantasma(fantasma[i][0] + 1, fantasma[i][1], i))
                     andarFantasma(1, i);
                 else
                     while (numero == 1 || numero == 0)
                         numero = rand() % 4;
                 break;
             case 2: // pra esquerda
-                if(verificarPosicaoFantasma(fantasma[i][0], fantasma[i][1] - 1, i))
+                if(podeMoverFantasma(fantasma[i][0], fantasma[i][1] - 1, i))
                     andarFantasma(2, i);
                 else
                     while (numero == 2 || numero == 3)
                         numero = rand() % 4;
                 break;
             case 3: // pra direita
-                if(verificarPosicaoFantasma(fantasma[i][0], fantasma[i][1] + 1, i))
+                if(podeMoverFantasma(fantasma[i][0], fantasma[i][1] + 1, i))
                     andarFantasma(3, i);
                 else
                     while (numero == 2 || numero == 3)
