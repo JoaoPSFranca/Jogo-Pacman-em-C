@@ -94,7 +94,7 @@ void gotoxy(int x, int y){
 
 void desenharPacman(){
     gotoxy(pacman[1] * 3, pacman[0]);
-    printf(" %c ", 232);
+    printf(" %c ", 184);
 }
 
 void apagaPacman(){
@@ -123,6 +123,13 @@ void andarPacman(int direcao){
         case 3: pacman[1]++; break;
     }
 
+    // Se a coluna (y) saiu do mapa, teletransporta
+    if (pacman[1] < 0) {
+        pacman[1] = MAXCOL - 1;
+    } else if (pacman[1] >= MAXCOL) {
+        pacman[1] = 0;
+    }
+
     desenharPacman();
     Sleep(velo);
     ReleaseMutex(mutex);
@@ -139,7 +146,7 @@ void apagaFantasma(int fant[2]){
 
 void desenharFantasma(int fant[2]){
     gotoxy(fant[1] * 3, fant[0]);
-    printf(" %c ", 219);
+    printf(" %c ", 178);
 }
 
 void andarFantasma(int direcao, int i){
@@ -151,6 +158,13 @@ void andarFantasma(int direcao, int i){
         case 1: fantasma[i][0]++; break;
         case 2: fantasma[i][1]--; break;
         case 3: fantasma[i][1]++; break;
+    }
+
+    // Se a coluna (y) saiu do mapa, teletransporta
+    if (fantasma[i][1] < 0) {
+        fantasma[i][1] = MAXCOL - 1;
+    } else if (fantasma[i][1] >= MAXCOL) {
+        fantasma[i][1] = 0;
     }
 
     desenharFantasma(fantasma[i]);
@@ -198,13 +212,26 @@ int verificarPonto(){
 }
 
 int verificarPosicao(int x, int y){
+    // Se a coluna (y) sair do mapa, verificar do outro lado
+    if (y < 0) {
+        y = MAXCOL - 1; 
+    } else if (y >= MAXCOL) {
+        y = 0;
+    }
+    
+    // Se a linha (x) sair do mapa, é uma parede (sem túnel vertical)
+    if (x < 0 || x >= MAXLIN) {
+        return 0;
+    }
+    
     WaitForSingleObject(mutex,INFINITE);
     int verify = 0;
 
-    if(x == 24 && y == 14 && fruta){
+    if (x == 24 && y == 14 && fruta) {
         pontos += 30;
         fruta = 0;
         apagaFruta();
+        
         if(!pontosTotais)
             gameWin = 1;
     }
@@ -282,9 +309,17 @@ DWORD WINAPI moverPacman(LPVOID lpParam) {
 
 // Verifica se a posição (x, y) está livre para o fantasma 'index'
 int podeMoverFantasma(int x, int y, int fantasma_index){
-    // 1. Verifica limites do mapa (O BUG PRINCIPAL)
-    if (x < 0 || x >= MAXLIN || y < 0 || y >= MAXCOL) 
+    // Se a coluna (y) sair do mapa, verificar do outro lado
+    if (y < 0) {
+        y = MAXCOL - 1; 
+    } else if (y >= MAXCOL) {
+        y = 0;
+    }
+    
+    // Se a linha (x) sair do mapa, é uma parede (sem túnel vertical)
+    if (x < 0 || x >= MAXLIN) {
         return 0;
+    }
 
     WaitForSingleObject(mutex, INFINITE);
 
