@@ -332,22 +332,21 @@ DWORD WINAPI cacarPacman(LPVOID lpParam) {
         int xAtual = fantasma[i][0];
         int yAtual = fantasma[i][1];
 
+        int pode[4];
         // --- 1. Verificar quais movimentos são possíveis ---
-        int podeCima = podeMoverFantasma(xAtual - 1, yAtual, i);
-        int podeBaixo = podeMoverFantasma(xAtual + 1, yAtual, i);
-        int podeEsq = podeMoverFantasma(xAtual, yAtual - 1, i);
-        int podeDir = podeMoverFantasma(xAtual, yAtual + 1, i);
-
-        int numMovesValidos = podeCima + podeBaixo + podeEsq + podeDir;
+        pode[0] = podeMoverFantasma(xAtual - 1, yAtual, i); // Cima
+        pode[1] = podeMoverFantasma(xAtual + 1, yAtual, i); // Baixo
+        pode[2] = podeMoverFantasma(xAtual, yAtual - 1, i); // Esquerda
+        pode[3] = podeMoverFantasma(xAtual, yAtual + 1, i); // Direita
 
         // --- 2. Decidir se precisa de uma nova direção ---
         bool precisaDecidir = false;
 
         // Se a direção atual é inválida (bateu na parede)
-        if (direcaoAtual == 0 && !podeCima) precisaDecidir = true;
-        else if (direcaoAtual == 1 && !podeBaixo) precisaDecidir = true;
-        else if (direcaoAtual == 2 && !podeEsq) precisaDecidir = true;
-        else if (direcaoAtual == 3 && !podeDir) precisaDecidir = true;
+        if (direcaoAtual == 0 && !pode[0]) precisaDecidir = true;
+        else if (direcaoAtual == 1 && !pode[1]) precisaDecidir = true;
+        else if (direcaoAtual == 2 && !pode[2]) precisaDecidir = true;
+        else if (direcaoAtual == 3 && !pode[3]) precisaDecidir = true;
 
         // Calcula a direção reversa (de onde viemos)
         int dirReversa = -1;
@@ -358,10 +357,10 @@ DWORD WINAPI cacarPacman(LPVOID lpParam) {
 
         // É uma junção? (ignora o caminho de onde viemos)
         int numOpcoes = 0;
-        if (podeCima && 0 != dirReversa) numOpcoes++;
-        if (podeBaixo && 1 != dirReversa) numOpcoes++;
-        if (podeEsq && 2 != dirReversa) numOpcoes++;
-        if (podeDir && 3 != dirReversa) numOpcoes++;
+        if (pode[0] && 0 != dirReversa) numOpcoes++;
+        if (pode[1] && 1 != dirReversa) numOpcoes++;
+        if (pode[2] && 2 != dirReversa) numOpcoes++;
+        if (pode[3] && 3 != dirReversa) numOpcoes++;
 
         if (numOpcoes > 1) {
              precisaDecidir = true; // Chegou numa junção com >1 escolha
@@ -377,53 +376,64 @@ DWORD WINAPI cacarPacman(LPVOID lpParam) {
             int pacmanY = pacman[1];
             ReleaseMutex(mutex);
 
-            // Testar Cima (0)
-            if (podeCima && 0 != dirReversa) {
+            // *** INÍCIO DA CORREÇÃO: LÓGICA DE PRIORIDADE ***
+            // Testamos na ordem de prioridade: Cima > Esquerda > Baixo > Direita
+            // Como usamos "<" (menor que), a primeira direção que encontrar a 
+            // menor distância será a escolhida, resolvendo o empate.
+
+            // Prioridade 1: Testar Cima (0)
+            if (pode[0] && 0 != dirReversa) {
                 int dist = abs((xAtual - 1) - pacmanX) + abs(yAtual - pacmanY); 
                 if (dist < menorDist) {
                     menorDist = dist;
                     melhorDir = 0;
                 }
             }
-            // Testar Baixo (1)
-            if (podeBaixo && 1 != dirReversa) {
-                int dist = abs((xAtual + 1) - pacmanX) + abs(yAtual - pacmanY);
-                if (dist < menorDist) {
-                    menorDist = dist;
-                    melhorDir = 1;
-                }
-            }
-            // Testar Esquerda (2)
-            if (podeEsq && 2 != dirReversa) {
+
+            // Prioridade 2: Testar Esquerda (2)
+            if (pode[2] && 2 != dirReversa) {
                 int dist = abs(xAtual - pacmanX) + abs((yAtual - 1) - pacmanY);
                 if (dist < menorDist) {
                     menorDist = dist;
                     melhorDir = 2;
                 }
             }
-            // Testar Direita (3)
-            if (podeDir && 3 != dirReversa) {
+
+            // Prioridade 3: Testar Baixo (1)
+            if (pode[1] && 1 != dirReversa) {
+                int dist = abs((xAtual + 1) - pacmanX) + abs(yAtual - pacmanY);
+                if (dist < menorDist) {
+                    menorDist = dist;
+                    melhorDir = 1;
+                }
+            }
+
+            // Prioridade 4: Testar Direita (3)
+            if (pode[3] && 3 != dirReversa) {
                 int dist = abs(xAtual - pacmanX) + abs((yAtual + 1) - pacmanY);
                 if (dist < menorDist) {
                     menorDist = dist;
                     melhorDir = 3;
                 }
             }
+            // *** FIM DA CORREÇÃO ***
+
 
             // Se não achou melhor direção (beco sem saída), a única opção é voltar
             if (melhorDir == -1) {
                 // Só pode voltar se a direção reversa for válida
-                if (dirReversa == 0 && podeCima) melhorDir = 0;
-                else if (dirReversa == 1 && podeBaixo) melhorDir = 1;
-                else if (dirReversa == 2 && podeEsq) melhorDir = 2;
-                else if (dirReversa == 3 && podeDir) melhorDir = 3;
+                if (dirReversa == 0 && pode[0]) melhorDir = 0;
+                else if (dirReversa == 1 && pode[1]) melhorDir = 1;
+                else if (dirReversa == 2 && pode[2]) melhorDir = 2;
+                else if (dirReversa == 3 && pode[3]) melhorDir = 3;
                 else {
                     // Preso! (Não deve acontecer, mas por segurança)
                     // Fica parado ou escolhe a primeira opção válida
-                    if(podeCima) melhorDir = 0;
-                    else if(podeBaixo) melhorDir = 1;
-                    else if(podeEsq) melhorDir = 2;
-                    else if(podeDir) melhorDir = 3;
+                    if(pode[0]) melhorDir = 0;
+                    else if(pode[1]) melhorDir = 1;
+                    else if(pode[2]) melhorDir = 2;
+                    else if(pode[3]) melhorDir = 3;
+                    else melhorDir = -1; // Totalmente preso
                 }
             }
             
